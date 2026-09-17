@@ -1,51 +1,149 @@
 function executeCode(code) {
   return new Promise((resolve) => {
     try {
-      const lines = code.split("\n").map(line => line.trim()).filter(Boolean);
+      const lines = code
+        .split("\n")
+        .map(line => line.trim())
+        .filter(Boolean);
+
       const variables = {};
       const output = [];
 
       for (const line of lines) {
-        if (line.startsWith("%")) continue;
+        // MATLAB comments
+        if (line.startsWith("%")) {
+          continue;
+        }
 
+        // disp(...)
         const dispMatch = line.match(/^disp\s*\((.*)\)\s*;?$/);
+
         if (dispMatch) {
-          output.push(String(evaluateExpression(dispMatch[1].trim(), variables)));
+          const value = evaluateExpression(
+            dispMatch[1].trim(),
+            variables
+          );
+
+          output.push(formatValue(value));
           continue;
         }
 
-        const assignment = line.match(/^([a-zA-Z_]\w*)\s*=\s*(.+?);?$/);
+        // variable assignment
+        const assignment = line.match(
+          /^([a-zA-Z_]\w*)\s*=\s*(.+?);?$/
+        );
+
         if (assignment) {
-          variables[assignment[1]] = evaluateExpression(assignment[2], variables);
+          const variableName = assignment[1];
+          const expression = assignment[2].trim();
+
+          variables[variableName] =
+            evaluateExpression(expression, variables);
+
           continue;
         }
 
+        // expression without assignment
         const value = evaluateExpression(line, variables);
-        if (value !== undefined && value !== null) output.push(String(value));
+
+        if (value !== undefined && value !== null) {
+          output.push(formatValue(value));
+        }
       }
 
-      resolve({ success: true, output: output.join("\n"), error: null });
+      resolve({
+        success: true,
+        output: output.join("\n"),
+        error: null
+      });
+
     } catch (error) {
-      resolve({ success: false, output: "", error: error.message });
+      resolve({
+        success: false,
+        output: "",
+        error: error.message
+      });
     }
   });
 }
 
+
 function evaluateExpression(expression, variables) {
-  expression = expression.replace(/;$/, "").trim();
+  expression = expression
+    .replace(/;$/, "")
+    .trim();
 
-  if (Object.prototype.hasOwnProperty.call(variables, expression)) return variables[expression];
+  // Variable directly
+  if (
+    Object.prototype.hasOwnProperty.call(
+      variables,
+      expression
+    )
+  ) {
+    return variables[expression];
+  }
 
-  if ((expression.startsWith('"') && expression.endsWith('"')) ||
-      (expression.startsWith("'") && expression.endsWith("'"))) {
+  // Strings
+  if (
+    (expression.startsWith('"') &&
+      expression.endsWith('"')) ||
+    (expression.startsWith("'") &&
+      expression.endsWith("'"))
+  ) {
     return expression.slice(1, -1);
   }
 
-  if (/^[0-9+\-*/().\s]+$/.test(expression)) {
-    return Function('"use strict"; return (' + expression + ')')();
+  // Replace known variables with their numeric values
+  let converted = expression.replace(
+    /\b[a-zA-Z_]\w*\b/g,
+    (name) => {
+      if (
+        Object.prototype.hasOwnProperty.call(
+          variables,
+          name
+        )
+      ) {
+        const value = variables[name];
+
+        if (typeof value === "number") {
+          return String(value);
+        }
+
+        throw new Error(
+          `Variable ${name} is not numeric`
+        );
+      }
+
+      return name;
+    }
+  );
+
+  // Allow only basic arithmetic
+  if (!/^[0-9+\-*/().\s]+$/.test(converted)) {
+    throw new Error(
+      `Unsupported expression: ${expression}`
+    );
   }
 
-  throw new Error(`Unsupported expression: ${expression}`);
+  return Function(
+    '"use strict"; return (' + converted + ')'
+  )();
 }
 
-module.exports = { executeCode };
+
+function formatValue(value) {
+  if (typeof value === "number") {
+    return String(value);
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  return String(value);
+}
+
+
+module.exports = {
+  executeCode
+};
